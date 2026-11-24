@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FCFNN / MLP: 5×5 digit classifier animation</title>
+<style>
+  :root {
+    --text-primary: #1f1f1e;
+    --text-secondary: #6b6a66;
+    --bg-page: #ffffff;
+    --bg-neutral: #f1efe8;
+    --border: rgba(0,0,0,0.10);
+    --border-strong: rgba(0,0,0,0.22);
+    --accent: #534AB7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --text-primary: #ececea;
+      --text-secondary: #a3a29c;
+      --bg-page: #1a1a19;
+      --bg-neutral: #2c2c2a;
+      --border: rgba(255,255,255,0.10);
+      --border-strong: rgba(255,255,255,0.25);
+      --accent: #AFA9EC;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px 40px;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-page); color: var(--text-primary); line-height: 1.6;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+  p.lead { color: var(--text-secondary); font-size: 15px; margin: 0 0 18px; }
+  button {
+    font: inherit; font-size: 14px; color: var(--text-primary);
+    background: transparent; border: 0.5px solid var(--border-strong);
+    border-radius: 8px; padding: 5px 12px; cursor: pointer;
+  }
+  button:hover { background: var(--bg-neutral); }
+  button:active { transform: scale(0.98); }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 0 0 10px; }
+  .muted { font-size: 13px; color: var(--text-secondary); }
+  canvas { width: 100%; height: auto; display: block; border-radius: 12px; border: 0.5px solid var(--border); cursor: pointer; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-top: 10px; }
+  .card { background: var(--bg-neutral); border-radius: 8px; padding: 8px 12px; }
+  .card .k { font-size: 12px; color: var(--text-secondary); }
+  .card .v { font-size: 16px; font-weight: 500; }
+  footer { margin-top: 22px; font-size: 13px; color: var(--text-secondary); }
+  footer ul { margin: 6px 0 0; padding-left: 18px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Fully connected neural network: 5×5 digit classifier</h1>
+  <p class="lead">A 25 → 16 → 12 → 10 network, trained live in your browser on tiny 5×5 digit patterns. Pick a digit or click pixels to draw, then watch the image flatten and flow through the layers.</p>
+
+  <div class="row">
+    <span class="muted" style="margin-right:4px;">Load digit</span>
+    <span id="digits" style="display:flex;gap:4px;flex-wrap:wrap;"></span>
+    <span style="flex:1"></span>
+    <button id="run">▶ Run again</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div class="muted" style="margin:0 0 8px;">Click pixels in the 5×5 grid to draw. <span id="status" style="color:var(--text-primary);font-weight:500;"></span></div>
+
+  <canvas id="cv" width="680" height="470" aria-label="Animated neural network diagram"></canvas>
+
+  <div class="cards">
+    <div class="card"><div class="k">Input layer</div><div class="v">25 (5 × 5)</div></div>
+    <div class="card"><div class="k">Hidden 1 · ReLU</div><div class="v">16 neurons</div></div>
+    <div class="card"><div class="k">Hidden 2 · ReLU</div><div class="v">12 neurons</div></div>
+    <div class="card"><div class="k">Output · softmax</div><div class="v">10 (digits 0–9)</div></div>
+  </div>
+
+  <footer>
+    <strong style="font-weight:500;color:var(--text-primary);">How to read it</strong>
+    <ul>
+      <li>Purple hidden neurons glow brighter the more strongly they fire; grey means ReLU output 0.</li>
+      <li>Green connections push the next neuron up (positive weight); orange connections push it down (negative weight).</li>
+      <li>Total learnable parameters: (25×16+16) + (16×12+12) + (12×10+10) = 750.</li>
+      <li>Each page load trains a fresh network from random weights, so results can differ slightly.</li>
+    </ul>
+  </footer>
+</main>
+
+<script>
+const PAT=["0111010001100011000101110","0010001100001000010001110","0111010001001100100011111","1111000001001100000111110","1001010010111110001000010","1111110000111100000111110","0111010000111101000101110","1111100001000100010000100","0111010001011101000101110","0111010001011110000101110"].map(s=>s.split('').map(Number));
+const L=[25,16,12,10];
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#888';
+let Wt=[],Bs=[],img=PAT[3].slice(),acts=null,t=0,timer=null,ready=false;
+function rnd(){return Math.random()*2-1;}
+function initNet(){Wt=[];Bs=[];for(let l=0;l<3;l++){const a=L[l],b=L[l+1],s=Math.sqrt(2/a);Wt.push(Array.from({length:b},()=>Array.from({length:a},()=>rnd()*s)));Bs.push(Array(b).fill(0));}}
+function fwd(x){const A=[x];let h=x;for(let l=0;l<3;l++){const z=Wt[l].map((w,j)=>w.reduce((s,v,i)=>s+v*h[i],Bs[l][j]));
+  if(l<2)h=z.map(v=>v>0?v:0);else{const m=Math.max(...z),e=z.map(v=>Math.exp(v-m)),S=e.reduce((a,b)=>a+b,0);h=e.map(v=>v/S);}A.push(h);}return A;}
+function train(){
+  const X=[],Y=[];
+  for(let d=0;d<10;d++)for(let k=0;k<24;k++){const x=PAT[d].slice();if(k){const f=1+(k%3);for(let q=0;q<f;q++){const i=Math.floor(Math.random()*25);x[i]=1-x[i];}}X.push(x);Y.push(d);}
+  const P=[];Wt.forEach((w,l)=>{w.forEach(r=>P.push({r}));P.push({r:Bs[l]});});
+  const M=P.map(p=>p.r.map(()=>0)),V=P.map(p=>p.r.map(()=>0));let T=0;
+  for(let ep=0;ep<250;ep++){
+    const gW=Wt.map(w=>w.map(r=>r.map(()=>0))),gB=Bs.map(b=>b.map(()=>0));
+    for(let n=0;n<X.length;n++){const A=fwd(X[n]);let d=A[3].map((p,j)=>(p-(j===Y[n]?1:0))/X.length);
+      for(let l=2;l>=0;l--){const h=A[l];for(let j=0;j<L[l+1];j++){gB[l][j]+=d[j];for(let i=0;i<L[l];i++)gW[l][j][i]+=d[j]*h[i];}
+        if(l>0){const nd=Array(L[l]).fill(0);for(let i=0;i<L[l];i++){if(h[i]<=0)continue;let s=0;for(let j=0;j<L[l+1];j++)s+=Wt[l][j][i]*d[j];nd[i]=s;}d=nd;}}}
+    T++;const lr=0.02;let pi=0;
+    for(let l=0;l<3;l++){const grads=[...gW[l],gB[l]];grads.forEach(g=>{const prm=P[pi].r;for(let k=0;k<prm.length;k++){M[pi][k]=0.9*M[pi][k]+0.1*g[k];V[pi][k]=0.999*V[pi][k]+0.001*g[k]*g[k];
+      prm[k]-=lr*(M[pi][k]/(1-Math.pow(0.9,T)))/(Math.sqrt(V[pi][k]/(1-Math.pow(0.999,T)))+1e-8);}pi++;});}
+  }
+}
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),W=680,H=470;
+const G={x:20,y:150,c:28};
+const LX=[210,345,470,575];
+function nyc(l,i){const n=L[l],span=Math.min(H-36,(n-1)*(l===0?17.5:l===3?40:l===1?27:34));const top=(H-span)/2;return top+span*i/(n-1);}
+const clamp=v=>Math.max(0,Math.min(1,v));
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  const txt=css('--text-primary'),sec=css('--text-secondary'),brd=css('--border-strong'),neu=css('--bg-neutral');
+  ctx.font='12px system-ui, sans-serif';ctx.textAlign='center';ctx.fillStyle=sec;
+  ctx.fillText('5×5 image',G.x+G.c*2.5,G.y-12);
+  ['input 25','hidden 16','hidden 12','output 10'].forEach((s,l)=>ctx.fillText(s,LX[l],12));
+  for(let r=0;r<5;r++)for(let c=0;c<5;c++){const v=img[r*5+c];ctx.fillStyle=v?txt:neu;ctx.fillRect(G.x+c*G.c,G.y+r*G.c,G.c-2,G.c-2);}
+  ctx.fillStyle=sec;ctx.fillText('flatten →',G.x+G.c*2.5,G.y+5*G.c+20);
+  for(let l=0;l<3;l++){const prog=clamp(t-1-l);const srcA=acts?acts[l]:null,mx=srcA?Math.max(...srcA,1e-6):1;
+    for(let j=0;j<L[l+1];j++)for(let i=0;i<L[l];i++){
+      let a=0.06;if(acts&&prog>0&&srcA[i]>0){const w=Wt[l][j][i];a=0.06+0.5*prog*clamp(Math.abs(w)*srcA[i]/mx);ctx.strokeStyle=w>0?'rgba(29,158,117,'+a+')':'rgba(216,90,48,'+a+')';}else ctx.strokeStyle='rgba(136,135,128,'+a+')';
+      ctx.lineWidth=0.8;ctx.beginPath();ctx.moveTo(LX[l],nyc(l,i));ctx.lineTo(LX[l+1],nyc(l+1,j));ctx.stroke();}}
+  const fp=clamp(t);
+  for(let i=0;i<25;i++){const r=Math.floor(i/5),c=i%5,gx=G.x+c*G.c+G.c/2-1,gy=G.y+r*G.c+G.c/2-1,tx=LX[0],ty=nyc(0,i);
+    const x=gx+(tx-gx)*fp,y=gy+(ty-gy)*fp;ctx.beginPath();ctx.arc(x,y,6,0,7);ctx.fillStyle=img[i]?txt:neu;ctx.fill();ctx.strokeStyle=brd;ctx.lineWidth=0.5;ctx.stroke();}
+  for(let l=1;l<4;l++){const p=clamp(t-l),A=acts?acts[l]:null,mx=A?Math.max(...A,1e-6):1;
+    let best=-1;if(l===3&&A)best=A.indexOf(Math.max(...A));
+    for(let j=0;j<L[l];j++){const y=nyc(l,j),rad=l===3?9:7;const v=A?A[j]/mx*p:0;
+      ctx.beginPath();ctx.arc(LX[l],y,rad,0,7);ctx.fillStyle=neu;ctx.fill();
+      if(v>0){ctx.beginPath();ctx.arc(LX[l],y,rad,0,7);ctx.fillStyle=l===3?'rgba(29,158,117,'+(0.15+0.85*v)+')':'rgba(127,119,221,'+(0.15+0.85*v)+')';ctx.fill();}
+      ctx.strokeStyle=brd;ctx.lineWidth=0.5;ctx.beginPath();ctx.arc(LX[l],y,rad,0,7);ctx.stroke();
+      if(l===3){ctx.fillStyle=txt;ctx.textAlign='left';ctx.fillText(j,LX[3]+15,y+4);
+        const pr=A?A[j]*p:0;ctx.fillStyle=j===best&&p>=1?'#1D9E75':'#B4B2A9';ctx.fillRect(LX[3]+28,y-5,62*pr,10);
+        ctx.fillStyle=sec;if(p>=1&&pr>0.005)ctx.fillText(Math.round(pr*100)+'%',LX[3]+32+62*pr,y+4);ctx.textAlign='center';}}}
+}
+function run(){if(!ready)return;acts=fwd(img);t=0;clearInterval(timer);timer=setInterval(()=>{t+=0.03;if(t>=4.2){t=4.2;clearInterval(timer);
+  const A=acts[3],b=A.indexOf(Math.max(...A));document.getElementById('status').textContent='Prediction: '+b+' ('+Math.round(A[b]*100)+'% confident)';}draw();},30);
+  document.getElementById('status').textContent='';}
+const dg=document.getElementById('digits');
+for(let d=0;d<10;d++){const b=document.createElement('button');b.textContent=d;b.style.minWidth='32px';b.onclick=()=>{img=PAT[d].slice();run();};dg.appendChild(b);}
+document.getElementById('run').onclick=run;
+document.getElementById('clear').onclick=()=>{img=Array(25).fill(0);acts=null;t=0;draw();document.getElementById('status').textContent='';};
+cv.addEventListener('click',e=>{const R=cv.getBoundingClientRect(),x=(e.clientX-R.left)*W/R.width,y=(e.clientY-R.top)*H/R.height;
+  const c=Math.floor((x-G.x)/G.c),r=Math.floor((y-G.y)/G.c);if(c>=0&&c<5&&r>=0&&r<5){img[r*5+c]^=1;run();}});
+if(window.matchMedia)window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change',draw);
+document.getElementById('status').textContent='Training the network…';draw();
+setTimeout(()=>{initNet();train();ready=true;run();},50);
+</script>
+</body>
+</html>
